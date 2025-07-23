@@ -375,18 +375,22 @@ It is possible by forcing md5 checksums on data by using the `--md5` option.
 
 To test [POST Object](https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPOST.html) operations use `-post` parameter.
 
+To add a [checksum](https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html) to the uploaded objects, use `--checksum` parameter.
+The following checksums are supported: `CRC32` (composite), `CRC32-FO` (full object), `CRC32C`, `CRC32-FO`, `CRC32C`, `SHA1`, `SHA256` and `CRC64NVME`.
+Adding a checksum will always disable MD5 checksums.
+
 ## DELETE
 
 Benchmarking delete operations will attempt to delete as many objects it can within `--duration`.
 
-By default, `--objects` objects of size `--obj.size` are uploaded beforing doin the actual bench.
+By default, `--objects` objects of size `--obj.size` are uploaded before doing the actual bench.
 
 The delete operations are done in `--batch` objects per request in `--concurrent` concurrently running requests.
 
 If there are no more objects left the benchmark will end.
 
 Using `--list-existing` will list at most `--objects` from the bucket and delete them instead of
-deleting random objects (set it to 0 to use all objects from the lsiting).
+deleting random objects (set it to 0 to use all objects from the listing).
 Listing is restricted to `--prefix` if it is set and recursive listing can be disabled by setting `--list-flat`.
 
 The analysis will include the upload stats as `PUT` operations and the `DELETE` operations.
@@ -507,6 +511,77 @@ Throughput, split into 9 x 1s:
 warp: Cleanup done.
 ```
 
+## MULTIPART PUT
+
+Multipart put benchmark tests upload speed of parts. It creates multipart upload, uploads `--parts` parts of
+`--part.size` size each and completes multipart upload when all parts are uploaded.
+
+Multipart put test runs `--concurrent` separate multipart uploads. Each of those uploads split up to
+`--part.concurrent` concurrent upload threads. So total concurrency is a `--concurrent`
+multiplied by `--part.concurrent`.
+
+```
+λ warp multipart-put --parts 100 --part.size 5MiB
+╭─────────────────────────────────╮
+│ WARP S3 Benchmark Tool by MinIO │
+╰─────────────────────────────────╯
+                                                                       
+Benchmarking: Press 'q' to abort benchmark and print partial results...
+                                                                       
+ λ █████████████████████████████████████████████████████████████████████████ 100%
+                                                                                       
+Reqs: 15867, Errs:0, Objs:15867, Bytes: 1983.4MiB                                      
+ -   PUTPART Average: 266 Obj/s, 33.2MiB/s; Current 260 Obj/s, 32.5MiB/s, 1193.7 ms/req
+                                                                                       
+Report: PUTPART. Concurrency: 400. Ran: 58s
+ * Average: 33.36 MiB/s, 266.85 obj/s
+ * Reqs: Avg: 1262.5ms, 50%: 935.3ms, 90%: 2773.8ms, 99%: 4395.2ms, Fastest: 53.6ms, Slowest: 6976.4ms, StdDev: 1027.5ms
+
+Throughput, split into 58 x 1s:
+ * Fastest: 37.9MiB/s, 302.87 obj/s
+ * 50% Median: 34.3MiB/s, 274.10 obj/s
+ * Slowest: 19.8MiB/s, 158.41 obj/s
+
+
+Cleanup Done
+```
+
+## APPEND (S3 Express)
+
+Benchmarks S3 Express One Zone [Append Object](https://docs.aws.amazon.com/AmazonS3/latest/userguide/directory-buckets-objects-append.html) operations.
+
+WARP will upload `--obj.size` objects for each `--concurrent` and append up to 10,000 parts to these.
+Each append operation will be one part and the size of each part will be `--part.size` - a new object will be created when the part limit is reached. 
+
+If no `--checksum` is specified, the CRC64NVME checksum will be used. The checksum type must support full object checksums (CRC32, CRC32C, CRC64NVME).
+
+Example:
+
+```
+λ warp append -duration=1m -obj.size=1MB
+╭─────────────────────────────────╮
+│ WARP S3 Benchmark Tool by MinIO │
+╰─────────────────────────────────╯
+
+Benchmarking: Press 'q' to abort benchmark and print partial results...
+
+ λ ████████████████████████████████████████████████████████████████████████░  99%
+
+Reqs: 4997, Errs:0, Objs:4997, Bytes: 4765.5MiB
+ -    APPEND Average: 84 Obj/s, 80.4MiB/s; Current 88 Obj/s, 84.4MiB/s, 280.7 ms/req
+
+
+Report: APPEND. Concurrency: 20. Ran: 58s
+ * Average: 80.15 MiB/s, 84.04 obj/s
+ * Reqs: Avg: 234.6ms, 50%: 203.9ms, 90%: 354.1ms, 99%: 711.3ms, Fastest: 58.3ms, Slowest: 1213.9ms, StdDev: 109.5ms
+
+Throughput, split into 58 x 1s:
+ * Fastest: 123.8MiB/s, 129.80 obj/s
+ * 50% Median: 80.1MiB/s, 83.97 obj/s
+ * Slowest: 23.6MiB/s, 24.74 obj/s
+```
+
+The "obj/s" indicates the number of append operations per second.
 
 ## ZIP
 

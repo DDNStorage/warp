@@ -1,5 +1,5 @@
 /*
- * Warp (C) 2019-2023 MinIO, Inc.
+ * Warp (C) 2019-2025 MinIO, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -20,33 +20,31 @@ package bench
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
 	"github.com/minio/minio-go/v7"
 )
 
-// Fanout benchmarks upload speed.
-type Fanout struct {
+// Append benchmarks upload speed via appends.
+type Append struct {
 	Common
-	Copies   int
 	prefixes map[string]struct{}
 }
 
 // Prepare will create an empty bucket or delete any content already there.
-func (u *Fanout) Prepare(ctx context.Context) error {
+func (u *Append) Prepare(ctx context.Context) error {
 	return u.createEmptyBucket(ctx)
 }
 
 // Start will execute the main benchmark.
 // Operations should begin executing when the start channel is closed.
-func (u *Fanout) Start(ctx context.Context, wait chan struct{}) error {
+func (u *Append) Start(ctx context.Context, wait chan struct{}) error {
 	var wg sync.WaitGroup
 	wg.Add(u.Concurrency)
 	c := u.Collector
 	if u.AutoTermDur > 0 {
-		ctx = c.AutoTerm(ctx, http.MethodPost, u.AutoTermScale, autoTermCheck, autoTermSamples, u.AutoTermDur)
+		ctx = c.AutoTerm(ctx, "APPEND", u.AutoTermScale, autoTermCheck, autoTermSamples, u.AutoTermDur)
 	}
 	u.prefixes = make(map[string]struct{}, u.Concurrency)
 
@@ -57,75 +55,88 @@ func (u *Fanout) Start(ctx context.Context, wait chan struct{}) error {
 		src := u.Source()
 		u.prefixes[src.Prefix()] = struct{}{}
 		go func(i int) {
+			part := 1
+			tmp := src.Object()
+			masterObj := *tmp
+
 			rcv := c.Receiver()
 			defer wg.Done()
-			opts := minio.PutObjectFanOutRequest{
-				Entries:  make([]minio.PutObjectFanOutEntry, u.Copies),
-				Checksum: minio.Checksum{},
-				SSE:      nil,
+
+			// Copy usermetadata and usertags per concurrent thread.
+			opts := u.PutOpts
+			opts.UserMetadata = make(map[string]string, len(u.PutOpts.UserMetadata))
+			opts.UserTags = make(map[string]string, len(u.PutOpts.UserTags))
+			// Only create 1 part on initial upload.
+			opts.DisableMultipart = true
+			for k, v := range u.PutOpts.UserMetadata {
+				opts.UserMetadata[k] = v
 			}
+			for k, v := range u.PutOpts.UserTags {
+				opts.UserTags[k] = v
+			}
+			aOpts := minio.AppendObjectOptions{
+				Progress:             nil,
+				ChunkSize:            0,
+				DisableContentSha256: opts.DisableContentSha256,
+			}
+
 			done := ctx.Done()
 
 			<-wait
 			for {
+				if part >= 10000 {
+					tmp := src.Object()
+					masterObj = *tmp
+					part = 1
+				}
+
 				select {
 				case <-done:
 					return
 				default:
 				}
-				obj := src.Object()
-				for i := range opts.Entries {
-					opts.Entries[i] = minio.PutObjectFanOutEntry{
-						Key:                fmt.Sprintf("%s/copy-%d.ext", obj.Name, i),
-						UserMetadata:       u.PutOpts.UserMetadata,
-						UserTags:           u.PutOpts.UserTags,
-						ContentType:        obj.ContentType,
-						ContentEncoding:    u.PutOpts.ContentEncoding,
-						ContentDisposition: u.PutOpts.ContentDisposition,
-						ContentLanguage:    u.PutOpts.ContentLanguage,
-						CacheControl:       u.PutOpts.CacheControl,
-					}
+
+				if u.rpsLimit(ctx) != nil {
+					return
 				}
+				obj := src.Object()
+				obj.Name = masterObj.Name
+				obj.Prefix = masterObj.Prefix
+				obj.ContentType = masterObj.ContentType
+
+				opts.ContentType = obj.ContentType
 				client, cldone := u.Client()
 				op := Operation{
-					OpType:   http.MethodPost,
+					OpType:   "APPEND",
 					Thread:   uint16(i),
-					Size:     obj.Size * int64(u.Copies),
-					ObjPerOp: u.Copies,
+					Size:     obj.Size,
+					ObjPerOp: 1,
 					File:     obj.Name,
 					Endpoint: client.EndpointURL().String(),
 				}
 
 				op.Start = time.Now()
-				res, err := client.PutObjectFanOut(nonTerm, u.Bucket(), obj.Reader, opts)
+				var err error
+				var res minio.UploadInfo
+				if part == 1 {
+					res, err = client.PutObject(nonTerm, u.Bucket, obj.Name, obj.Reader, obj.Size, opts)
+				} else {
+					res, err = client.AppendObject(nonTerm, u.Bucket, obj.Name, obj.Reader, obj.Size, aOpts)
+				}
 				op.End = time.Now()
 				if err != nil {
 					u.Error("upload error: ", err)
 					op.Err = err.Error()
 				}
 
-				var firstErr string
-				nErrs := 0
-				for _, r := range res {
-					if r.Error != "" {
-						if firstErr == "" {
-							firstErr = r.Error
-						}
-						nErrs++
-					}
-				}
-				if op.Err == "" && nErrs > 0 {
-					op.Err = fmt.Sprintf("%d copies failed. First error: %v", nErrs, firstErr)
-				}
-
-				if len(res) != u.Copies && op.Err == "" {
-					err := fmt.Sprint("short upload. want:", u.Copies, " copies, got:", len(res))
+				if res.Size != int64(part)*obj.Size && op.Err == "" {
+					err := fmt.Sprint("part ", part, " short upload. want:", int64(part)*obj.Size, ", got:", res.Size)
 					if op.Err == "" {
 						op.Err = err
 					}
 					u.Error(err)
 				}
-
+				part++
 				cldone()
 				rcv <- op
 			}
@@ -136,7 +147,7 @@ func (u *Fanout) Start(ctx context.Context, wait chan struct{}) error {
 }
 
 // Cleanup deletes everything uploaded to the bucket.
-func (u *Fanout) Cleanup(ctx context.Context) {
+func (u *Append) Cleanup(ctx context.Context) {
 	pf := make([]string, 0, len(u.prefixes))
 	for p := range u.prefixes {
 		pf = append(pf, p)

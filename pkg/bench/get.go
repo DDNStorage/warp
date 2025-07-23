@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
-	"github.com/minio/pkg/v2/console"
 	"github.com/minio/warp/pkg/generator"
 )
 
@@ -57,7 +56,6 @@ type Get struct {
 // and upload a number of objects.
 func (g *Get) Prepare(ctx context.Context) error {
 	// prepare the bench by listing object from the bucket
-	g.addCollector()
 	if g.ListExisting {
 		cl, done := g.Client()
 
@@ -102,10 +100,8 @@ func (g *Get) Prepare(ctx context.Context) error {
 					if version >= g.Versions {
 						continue
 					}
-					versions[object.Key]++
-				} else {
-					versions[object.Key] = 1
 				}
+				versions[object.Key]++
 				obj.VersionID = object.VersionID
 			}
 
@@ -138,18 +134,17 @@ func (g *Get) Prepare(ctx context.Context) error {
 		}
 		done()
 	}
-	console.Eraseline()
 	x := ""
 	if g.Versions > 1 {
 		x = fmt.Sprintf(" with %d versions each", g.Versions)
 	}
-	console.Info("\rUploading ", g.CreateObjects, " objects", x)
+	g.UpdateStatus(fmt.Sprint("Uploading ", g.CreateObjects, " objects", x))
 
 	var wg sync.WaitGroup
 	wg.Add(g.Concurrency)
 
 	objs := splitObjs(g.CreateObjects, g.Concurrency)
-	rcv := g.Collector.rcv
+	rcv := g.Collector.Receiver()
 	var groupErr error
 	var mu sync.Mutex
 
@@ -247,7 +242,7 @@ func (f *firstByteRecorder) Read(p []byte) (n int, err error) {
 
 // Start will execute the main benchmark.
 // Operations should begin executing when the start channel is closed.
-func (g *Get) Start(ctx context.Context, wait chan struct{}) (Operations, error) {
+func (g *Get) Start(ctx context.Context, wait chan struct{}) error {
 	var wg sync.WaitGroup
 	wg.Add(g.Concurrency)
 	c := g.Collector
@@ -408,7 +403,7 @@ func (g *Get) Start(ctx context.Context, wait chan struct{}) (Operations, error)
 		}(i)
 	}
 	wg.Wait()
-	return c.Close(), nil
+	return nil
 }
 
 // Cleanup deletes everything uploaded to the bucket.

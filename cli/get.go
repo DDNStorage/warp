@@ -20,19 +20,11 @@ package cli
 import (
 	"github.com/minio/cli"
 	"github.com/minio/minio-go/v7"
-	"github.com/minio/pkg/v2/console"
+	"github.com/minio/pkg/v3/console"
 	"github.com/minio/warp/pkg/bench"
 )
 
 var getFlags = []cli.Flag{
-	cli.BoolFlag{
-		Name:  "list-existing",
-		Usage: "Instead of preparing the bench by PUTing some objects, only use objects already in the bucket",
-	},
-	cli.BoolFlag{
-		Name:  "list-flat",
-		Usage: "When using --list-existing, do not use recursive listing",
-	},
 	cli.IntFlag{
 		Name:  "objects",
 		Value: 2500,
@@ -63,21 +55,33 @@ var getFlags = []cli.Flag{
 		Usage: "Number of versions to upload. If more than 1, versioned listing will be benchmarked",
 	},
 	cli.BoolFlag{
+		Name:  "list-existing",
+		Usage: "Instead of preparing the bench by PUTing some objects, only use objects already in the bucket",
+	},
+	cli.BoolFlag{
+		Name:  "list-flat",
+		Usage: "When using --list-existing, do not use recursive listing",
+	},	
+	cli.BoolFlag{
 		Name:  "extra-head",
 		Usage: "Many apps HEAD before GET. Add an extra HEAD operation to emulate this behavior.",
 	},
 	cli.BoolFlag{
 		Name:  "verify-md5",
 		Usage: "Verify MD5 hash of downloaded objects against ETag",
+		Name:  "list-existing",
+		Usage: "Instead of preparing the bench by PUTing some objects, only use objects already in the bucket",
 	},
 }
+
+var GetCombinedFlags = combineFlags(globalFlags, ioFlags, getFlags, genFlags, benchFlags, analyzeFlags)
 
 var getCmd = cli.Command{
 	Name:   "get",
 	Usage:  "benchmark get objects",
 	Action: mainGet,
 	Before: setGlobalsFromContext,
-	Flags:  combineFlags(globalFlags, ioFlags, getFlags, genFlags, benchFlags, analyzeFlags),
+	Flags:  GetCombinedFlags,
 	CustomHelpTemplate: `NAME:
   {{.HelpName}} - {{.Usage}}
 
@@ -116,9 +120,6 @@ func mainGet(ctx *cli.Context) error {
 		ListPrefix:    ctx.String("prefix"),
 		ExtraHead:     ctx.Bool("extra-head"),
 		VerifyMD5:     ctx.Bool("verify-md5"),
-	}
-	if b.ListExisting && !ctx.IsSet("objects") {
-		b.CreateObjects = 0
 	}
 	return runBench(ctx, &b)
 }

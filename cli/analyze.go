@@ -18,6 +18,8 @@
 package cli
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,7 +34,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/minio/cli"
 	"github.com/minio/mc/pkg/probe"
-	"github.com/minio/pkg/v2/console"
+	"github.com/minio/pkg/v3/console"
 	"github.com/minio/warp/api"
 	"github.com/minio/warp/pkg/aggregate"
 	"github.com/minio/warp/pkg/bench"
@@ -85,6 +87,10 @@ var analyzeFlags = []cli.Flag{
 		Name:  serverFlagName,
 		Usage: "When running benchmarks open a webserver to fetch results remotely, eg: localhost:7762",
 	},
+	cli.BoolFlag{
+		Name:  "full",
+		Usage: "Record full analysis data with every request stored. Default will aggregate data.",
+	},
 }
 
 var analyzeCmd = cli.Command{
@@ -114,34 +120,56 @@ func mainAnalyze(ctx *cli.Context) error {
 	if len(args) == 0 {
 		console.Fatal("No benchmark data file supplied")
 	}
-	if len(args) > 1 {
-		console.Fatal("Only one benchmark file can be given")
-	}
-	zstdDec, _ := zstd.NewReader(nil)
-	defer zstdDec.Close()
-	monitor := api.NewBenchmarkMonitor(ctx.String(serverFlagName))
+	monitor := api.NewBenchmarkMonitor(ctx.String(serverFlagName), nil)
 	defer monitor.Done()
-	log := console.Printf
-	if globalQuiet {
+	log := func(format string, data ...interface{}) {
+		console.Eraseline()
+		console.Printf("\r"+format, data...)
+	}
+	if globalQuiet || globalJSON {
 		log = nil
 	}
 	for _, arg := range args {
-		var input io.Reader
-		if arg == "-" {
-			input = os.Stdin
+		rc, isAggregate := openInput(arg)
+		defer rc.Close()
+		if !ctx.Bool("full") || isAggregate {
+			var final aggregate.Realtime
+			if isAggregate {
+				if err := json.NewDecoder(rc).Decode(&final); err != nil {
+					fatalIf(probe.NewError(err), "Unable to parse input")
+				}
+				if log != nil {
+					log("Loading %q", arg)
+				}
+			} else {
+				opCh := make(chan bench.Operation, 10000)
+				go func() {
+					err := bench.StreamOperationsFromCSV(rc, false, ctx.Int("analyze.offset"), ctx.Int("analyze.limit"), log, opCh)
+					fatalIf(probe.NewError(err), "Unable to parse input")
+				}()
+				final = *aggregate.Live(opCh, nil, "")
+			}
+			rep := final.Report(aggregate.ReportOptions{
+				Details: true,
+				Color:   !globalNoColor,
+				OnlyOps: getAnalyzeOPS(ctx),
+			})
+			monitor.UpdateAggregate(&final, "")
+			if globalJSON {
+				b, err := json.MarshalIndent(final, "", "  ")
+				fatalIf(probe.NewError(err), "Unable to parse input")
+				fmt.Println(string(b))
+			} else {
+				console.Println("\n")
+				console.Println(rep.String())
+			}
 		} else {
-			f, err := os.Open(arg)
-			fatalIf(probe.NewError(err), "Unable to open input file")
-			defer f.Close()
-			input = f
+			ops, err := bench.OperationsFromCSV(rc, true, ctx.Int("analyze.offset"), ctx.Int("analyze.limit"), log)
+			fatalIf(probe.NewError(err), "Unable to parse input")
+			console.Println("")
+			printAnalysis(ctx, os.Stdout, ops)
+			monitor.OperationsReady(ops, strings.TrimSuffix(filepath.Base(arg), ".csv.zst"), commandLine(ctx))
 		}
-		err := zstdDec.Reset(input)
-		fatalIf(probe.NewError(err), "Unable to read input")
-		ops, err := bench.OperationsFromCSV(zstdDec, true, ctx.Int("analyze.offset"), ctx.Int("analyze.limit"), log)
-		fatalIf(probe.NewError(err), "Unable to parse input")
-
-		printAnalysis(ctx, ops)
-		monitor.OperationsReady(ops, strings.TrimSuffix(filepath.Base(arg), ".csv.zst"), commandLine(ctx))
 	}
 	return nil
 }
@@ -234,7 +262,46 @@ func printMixedOpAnalysis(ctx *cli.Context, aggr aggregate.Aggregated, details b
 	}
 }
 
-func printAnalysis(ctx *cli.Context, o bench.Operations) {
+func openInput(arg string) (rc io.ReadCloser, isJSON bool) {
+	var input io.Reader
+	var fileClose func() error
+	if arg == "-" {
+		input = os.Stdin
+	} else {
+		f, err := os.Open(arg)
+		fatalIf(probe.NewError(err), "Unable to open input file")
+		fileClose = f.Close
+		input = f
+	}
+	z, err := zstd.NewReader(input)
+	fatalIf(probe.NewError(err), "could not read from input")
+
+	buf := bufio.NewReader(z)
+	v, err := buf.Peek(1)
+	fatalIf(probe.NewError(err), "could not read from input")
+
+	return readCloser{
+		Reader: buf,
+		closeFn: func() error {
+			z.Close()
+			if fileClose != nil {
+				return fileClose()
+			}
+			return nil
+		},
+	}, bytes.Equal(v, []byte("{"))
+}
+
+type readCloser struct {
+	io.Reader
+	closeFn func() error
+}
+
+func (rc readCloser) Close() error {
+	return rc.closeFn()
+}
+
+func printAnalysis(ctx *cli.Context, w io.Writer, o bench.Operations) {
 	details := ctx.Bool("analyze.v")
 	var wrSegs io.Writer
 	prefiltered := false
@@ -265,7 +332,7 @@ func printAnalysis(ctx *cli.Context, o bench.Operations) {
 
 	if wantOp := ctx.String("analyze.op"); wantOp != "" {
 		prefiltered = prefiltered || o.IsMixed()
-		o = o.FilterByOp(wantOp)
+		o = o.FilterByOp(strings.ToUpper(wantOp))
 	}
 	durFn := func(total time.Duration) time.Duration {
 		if total <= 0 {
@@ -280,7 +347,7 @@ func printAnalysis(ctx *cli.Context, o bench.Operations) {
 	})
 	if wrSegs != nil {
 		for _, ops := range aggr.Operations {
-			writeSegs(ctx, wrSegs, o.FilterByOp(ops.Type), !(aggr.Mixed || prefiltered), details)
+			writeSegs(ctx, wrSegs, o.FilterByOp(ops.Type), !aggr.Mixed && !prefiltered, details)
 		}
 	}
 
@@ -293,6 +360,12 @@ func printAnalysis(ctx *cli.Context, o bench.Operations) {
 		os.Stdout.Write(b)
 		return
 	}
+
+	preOutput := color.Output
+	color.Output = w
+	defer func() {
+		color.Output = preOutput
+	}()
 
 	if aggr.Mixed {
 		printMixedOpAnalysis(ctx, aggr, details)
@@ -522,7 +595,7 @@ func printRequestAnalysis(_ *cli.Context, ops aggregate.Operation, details bool)
 			console.SetColor("Print", color.New(color.FgHiWhite))
 			console.Println("\nRequests by host:")
 
-			for _, ep := range reqs.HostNames {
+			for _, ep := range reqs.HostNames.Slice() {
 				reqs := eps[ep]
 				if reqs.Requests <= 1 {
 					continue
@@ -654,4 +727,11 @@ func stringKeysSorted[K string, V any](m map[K]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func getAnalyzeOPS(ctx *cli.Context) map[string]struct{} {
+	if wantOp := ctx.String("analyze.op"); wantOp != "" {
+		return map[string]struct{}{strings.ToUpper(wantOp): {}}
+	}
+	return nil
 }
