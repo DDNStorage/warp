@@ -19,6 +19,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -181,25 +182,39 @@ func getClient(ctx *cli.Context, host string) (*minio.Client, error) {
 func clientTransport(ctx *cli.Context) http.RoundTripper {
 	tr := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 10 * time.Second,
-		}).DialContext,
+		DialContext: func(c context.Context, network, addr string) (net.Conn, error) {
+			d := net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 10 * time.Second,
+			}
+			conn, err := d.DialContext(c, network, addr)
+			if err != nil {
+				return nil, err
+			}
+
+			// Type assert to get the underlying TCP connection
+			if tcpConn, ok := conn.(*net.TCPConn); ok {
+				// Set send buffer size
+				if err := tcpConn.SetWriteBuffer(ctx.Int("sndbuf")); err != nil {
+					return nil, fmt.Errorf("failed to set SO_SNDBUF: %v", err)
+				}
+				// Set receive buffer size
+				if err := tcpConn.SetReadBuffer(ctx.Int("rcvbuf")); err != nil {
+					return nil, fmt.Errorf("failed to set SO_RCVBUF: %v", err)
+				}
+			}
+
+			return conn, nil
+		},
 		MaxIdleConnsPerHost:   ctx.Int("concurrent"),
-		WriteBufferSize:       ctx.Int("sndbuf"), // Configure beyond 4KiB default buffer size.
-		ReadBufferSize:        ctx.Int("rcvbuf"), // Configure beyond 4KiB default buffer size.
+		WriteBufferSize:       ctx.Int("sndbuf"),
+		ReadBufferSize:        ctx.Int("rcvbuf"),
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   15 * time.Second,
 		ExpectContinueTimeout: 10 * time.Second,
 		ResponseHeaderTimeout: 2 * time.Minute,
-		// Set this value so that the underlying transport round-tripper
-		// doesn't try to auto decode the body of objects with
-		// content-encoding set to `gzip`.
-		//
-		// Refer:
-		//    https://golang.org/src/net/http/transport.go?h=roundTrip#L1843
-		DisableCompression: true,
-		DisableKeepAlives:  ctx.Bool("disable-http-keepalive"),
+		DisableCompression:    true,
+		DisableKeepAlives:     ctx.Bool("disable-http-keepalive"),
 	}
 	if ctx.Bool("tls") {
 		// Keep TLS config.
