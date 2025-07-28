@@ -53,18 +53,18 @@ func (g *Stat) Prepare(ctx context.Context) error {
 		cl, done := g.Client()
 
 		// ensure the bucket exist
-		found, err := cl.BucketExists(ctx, g.Bucket)
+		found, err := cl.BucketExists(ctx, g.Bucket())
 		if err != nil {
 			return err
 		}
 		if !found {
-			return (fmt.Errorf("bucket %s does not exist and --list-existing has been set", g.Bucket))
+			return (fmt.Errorf("bucket %s does not exist and --list-existing has been set", g.Bucket()))
 		}
 
 		// list all objects
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		objectCh := cl.ListObjects(ctx, g.Bucket, minio.ListObjectsOptions{
+		objectCh := cl.ListObjects(ctx, g.Bucket(), minio.ListObjectsOptions{
 			WithVersions: g.Versions > 1,
 			Prefix:       g.ListPrefix,
 			Recursive:    !g.ListFlat,
@@ -106,7 +106,7 @@ func (g *Stat) Prepare(ctx context.Context) error {
 			}
 		}
 		if len(g.objects) == 0 {
-			return (fmt.Errorf("no objects found for bucket %s", g.Bucket))
+			return (fmt.Errorf("no objects found for bucket %s", g.Bucket()))
 		}
 		done()
 		return nil

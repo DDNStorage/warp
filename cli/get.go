@@ -69,8 +69,6 @@ var getFlags = []cli.Flag{
 	cli.BoolFlag{
 		Name:  "verify-md5",
 		Usage: "Verify MD5 hash of downloaded objects against ETag",
-		Name:  "list-existing",
-		Usage: "Instead of preparing the bench by PUTing some objects, only use objects already in the bucket",
 	},
 }
 
@@ -120,6 +118,9 @@ func mainGet(ctx *cli.Context) error {
 		ListPrefix:    ctx.String("prefix"),
 		ExtraHead:     ctx.Bool("extra-head"),
 		VerifyMD5:     ctx.Bool("verify-md5"),
+	}
+	if b.ListExisting && !ctx.IsSet("objects") {
+		b.CreateObjects = 0
 	}
 	return runBench(ctx, &b)
 }

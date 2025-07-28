@@ -119,9 +119,9 @@ func (u *Append) Start(ctx context.Context, wait chan struct{}) error {
 				var err error
 				var res minio.UploadInfo
 				if part == 1 {
-					res, err = client.PutObject(nonTerm, u.Bucket, obj.Name, obj.Reader, obj.Size, opts)
+					res, err = client.PutObject(nonTerm, u.Bucket(), obj.Name, obj.Reader, obj.Size, opts)
 				} else {
-					res, err = client.AppendObject(nonTerm, u.Bucket, obj.Name, obj.Reader, obj.Size, aOpts)
+					res, err = client.AppendObject(nonTerm, u.Bucket(), obj.Name, obj.Reader, obj.Size, aOpts)
 				}
 				op.End = time.Now()
 				if err != nil {

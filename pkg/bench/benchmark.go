@@ -149,7 +149,7 @@ func (c *Common) createEmptyBucket(ctx context.Context) error {
 			if bvc, err := cl.GetBucketVersioning(ctx, c.Bucket()); err == nil {
 				c.Versioned = bvc.Status == "Enabled"
 			}
-			c.UpdateStatus(fmt.Sprintf("Clearing Bucket %q to enable locking", c.Bucket))
+			c.UpdateStatus(fmt.Sprintf("Clearing Bucket %q to enable locking", c.Bucket()))
 			c.deleteAllInBucket(ctx)
 			err = cl.RemoveBucket(ctx, c.Bucket())
 			if err != nil {
@@ -161,8 +161,8 @@ func (c *Common) createEmptyBucket(ctx context.Context) error {
 	}
 
 	if !x {
-		c.UpdateStatus(fmt.Sprintf("Creating Bucket %q", c.Bucket))
-		err := cl.MakeBucket(ctx, c.Bucket, minio.MakeBucketOptions{
+		c.UpdateStatus(fmt.Sprintf("Creating Bucket %q", c.Bucket()))
+		err := cl.MakeBucket(ctx, c.Bucket(), minio.MakeBucketOptions{
 			Region:        c.Location,
 			ObjectLocking: c.Locking,
 		})
@@ -185,7 +185,7 @@ func (c *Common) createEmptyBucket(ctx context.Context) error {
 	}
 
 	if c.Clear {
-		c.UpdateStatus(fmt.Sprintf("Clearing Bucket %q", c.Bucket))
+		c.UpdateStatus(fmt.Sprintf("Clearing Bucket %q", c.Bucket()))
 		c.deleteAllInBucket(ctx)
 	}
 	return nil
@@ -217,8 +217,8 @@ func (c *Common) deleteAllInBucket(ctx context.Context, prefixes ...string) {
 				opts.Prefix = prefix + "/"
 			}
 			removed := 0
-			c.UpdateStatus(fmt.Sprintf("Clearing Prefix %q", strings.Join([]string{c.Bucket, opts.Prefix}, "/")))
-			for object := range cl.ListObjects(ctx, c.Bucket, opts) {
+			c.UpdateStatus(fmt.Sprintf("Clearing Prefix %q", strings.Join([]string{c.Bucket(), opts.Prefix}, "/")))
+			for object := range cl.ListObjects(ctx, c.Bucket(), opts) {
 				if object.Err != nil {
 					c.Error(object.Err)
 					return
@@ -226,7 +226,7 @@ func (c *Common) deleteAllInBucket(ctx context.Context, prefixes ...string) {
 				removed++
 				objectsCh <- object
 				if removed%1000 == 0 {
-					c.UpdateStatus(fmt.Sprintf("Clearing Prefix %q. Deleted %d objects", strings.Join([]string{c.Bucket, opts.Prefix}, "/"), removed))
+					c.UpdateStatus(fmt.Sprintf("Clearing Prefix %q. Deleted %d objects", strings.Join([]string{c.Bucket(), opts.Prefix}, "/"), removed))
 				}
 			}
 		}

@@ -181,7 +181,7 @@ func (g *Multipart) AfterPrepare(ctx context.Context) error {
 		i++
 	}
 	g.UpdateStatus(fmt.Sprintf("Completing Object with %d parts...", len(parts)))
-	_, err := c.CompleteMultipartUpload(ctx, g.Bucket, g.ObjName, g.UploadID, parts, g.PutOpts)
+	_, err := c.CompleteMultipartUpload(ctx, g.Bucket(), g.ObjName, g.UploadID, parts, g.PutOpts)
 	return err
 }
 

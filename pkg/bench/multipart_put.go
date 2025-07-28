@@ -86,7 +86,7 @@ func (g *MultipartPut) createMultupartUpload(ctx context.Context, objectName str
 	client, done := g.Client()
 	defer done()
 	c := minio.Core{Client: client}
-	return c.NewMultipartUpload(nonTerm, g.Bucket, objectName, g.PutOpts)
+	return c.NewMultipartUpload(nonTerm, g.Bucket(), objectName, g.PutOpts)
 }
 
 func (g *MultipartPut) uploadParts(ctx context.Context, thread uint16, objectName, uploadID string) ([]minio.CompletePart, error) {
@@ -144,7 +144,7 @@ func (g *MultipartPut) uploadParts(ctx context.Context, thread uint16, objectNam
 				}
 
 				op.Start = time.Now()
-				res, err := core.PutObjectPart(nonTerm, g.Bucket, objectName, uploadID, partIdx, obj.Reader, obj.Size, opts)
+				res, err := core.PutObjectPart(nonTerm, g.Bucket(), objectName, uploadID, partIdx, obj.Reader, obj.Size, opts)
 				op.End = time.Now()
 				if err != nil {
 					err := fmt.Errorf("upload error: %w", err)
@@ -186,6 +186,6 @@ func (g *MultipartPut) completeMultipartUpload(ctx context.Context, objectName, 
 	cl, done := g.Client()
 	c := minio.Core{Client: cl}
 	defer done()
-	_, err := c.CompleteMultipartUpload(nonTerm, g.Bucket, objectName, uploadID, parts, g.PutOpts)
+	_, err := c.CompleteMultipartUpload(nonTerm, g.Bucket(), objectName, uploadID, parts, g.PutOpts)
 	return err
 }

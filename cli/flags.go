@@ -388,7 +388,7 @@ func getCommon(ctx *cli.Context, src func() generator.Source) bench.Common {
 		Bucket:        bucketFunc,
 		Location:      ctx.String("region"),
 		PutOpts:       putOpts,
-		DiscardOutput: ctx.Bool("stress"),
+		DiscardOutput: noOps,
 		ExtraOut:      extra,
 		RpsLimiter:    rpsLimiter,
 		Transport:     clientTransport(ctx),

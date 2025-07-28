@@ -91,10 +91,11 @@ func init() {
 	a := []cli.Command{
 		mixedCmd,
 		getCmd,
-		putCmd,
+		putCmd,		
 		deleteCmd,
 		listCmd,
 		statCmd,
+		selectCmd,
 		versionedCmd,
 		retentionCmd,
 		multipartCmd,
