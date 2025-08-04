@@ -60,7 +60,7 @@ func tickCmd() tea.Cmd {
 }
 
 func (u *ui) Init() tea.Cmd {
-	u.progress = progress.New(progress.WithSolidFill("#c72e49"), progress.WithWidth(maxWidth-padding))
+	u.progress = progress.New(progress.WithSolidFill("12"), progress.WithWidth(maxWidth-padding))
 	u.quitCh = make(chan struct{})
 	return tea.Batch(tickCmd())
 }

@@ -331,7 +331,6 @@ func runServerBenchmark(ctx *cli.Context, b bench.Benchmark) (bool, error) {
 	if !ctx.Bool("keep-data") && !ctx.Bool("noclear") {
 		ui.SetPhase("Cleanup")
 		monitor.InfoLn("Starting cleanup...")
-		b.Cleanup(context.Background())
 
 		err = conns.startStageAll(stageCleanup, time.Now(), false)
 		if err != nil {
@@ -341,7 +340,8 @@ func runServerBenchmark(ctx *cli.Context, b bench.Benchmark) (bool, error) {
 		if err != nil {
 			errorLn("Failed to keep connection to all clients", err)
 		}
-		infoLn("Cleanup done.\n")
+		monitor.InfoLn("Cleanup done.")
+		fmt.Println("") // Add this line to reset terminal
 	}
 
 	return true, nil
