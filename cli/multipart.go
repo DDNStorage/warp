@@ -79,6 +79,9 @@ FLAGS:
 
 // mainMultipart is the entry point for put command.
 func mainMultipart(ctx *cli.Context) error {
+	if ctx.Bool("bucket-per-client") {
+		console.Fatal("bucket-per-client option is incompatible with multipart put benchmark\n")
+	}
 	checkMultipartSyntax(ctx)
 	b := bench.Multipart{
 		Common:      getCommon(ctx, newGenSource(ctx, "part.size")),
