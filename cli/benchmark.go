@@ -262,7 +262,6 @@ func runBench(ctx *cli.Context, b bench.Benchmark) error {
 				monitor.InfoLn(fmt.Sprintf("\nBenchmark data written to %q\n\n", fileName+".json.zst"))
 			}()
 		}
-
 		var rep *bytes.Buffer
 		if globalJSON {
 			rep = &bytes.Buffer{}
@@ -276,7 +275,7 @@ func runBench(ctx *cli.Context, b bench.Benchmark) error {
 				OnlyOps: getAnalyzeOPS(ctx),
 			})
 		}
-		
+
 		monitor.UpdateAggregate(final, fileName)
 		ui.Update(tea.Quit())
 		ui.Wait()

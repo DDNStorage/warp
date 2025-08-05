@@ -19,8 +19,6 @@ package cli
 
 import (
 	"bufio"
-	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -43,8 +41,6 @@ import (
 	"github.com/minio/pkg/v3/console"
 	"github.com/minio/pkg/v3/ellipses"
 	"github.com/minio/warp/pkg"
-	ktls "gitlab.com/go-extension/tls"
-	"golang.org/x/net/http2"
 )
 
 type hostSelectType string
@@ -178,7 +174,7 @@ func getClient(ctx *cli.Context, host string) (*minio.Client, error) {
 	}
 	cl, err := minio.New(host, &minio.Options{
 		Creds:           creds,
-		Secure:          ctx.Bool("tls"),
+		Secure:          ctx.Bool("tls") || ctx.Bool("ktls"),
 		Region:          ctx.String("region"),
 		BucketLookup:    lookup,
 		CustomMD5:       md5simd.NewServer().NewHash,
@@ -198,91 +194,14 @@ func getClient(ctx *cli.Context, host string) (*minio.Client, error) {
 }
 
 func clientTransport(ctx *cli.Context) http.RoundTripper {
-	tr := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: func(c context.Context, network, addr string) (net.Conn, error) {
-			d := net.Dialer{
-				Timeout:   10 * time.Second,
-				KeepAlive: 10 * time.Second,
-			}
-			conn, err := d.DialContext(c, network, addr)
-			if err != nil {
-				return nil, err
-			}
-
-			// Type assert to get the underlying TCP connection
-			if tcpConn, ok := conn.(*net.TCPConn); ok {
-				// Set send buffer size
-				if err := tcpConn.SetWriteBuffer(ctx.Int("sndbuf")); err != nil {
-					return nil, fmt.Errorf("failed to set SO_SNDBUF: %v", err)
-				}
-				// Set receive buffer size
-				if err := tcpConn.SetReadBuffer(ctx.Int("rcvbuf")); err != nil {
-					return nil, fmt.Errorf("failed to set SO_RCVBUF: %v", err)
-				}
-			}
-
-			return conn, nil
-		},
-		MaxIdleConnsPerHost:   ctx.Int("concurrent"),
-		WriteBufferSize:       ctx.Int("sndbuf"),
-		ReadBufferSize:        ctx.Int("rcvbuf"),
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   15 * time.Second,
-		ExpectContinueTimeout: 10 * time.Second,
-		ResponseHeaderTimeout: 2 * time.Minute,
-		DisableCompression:    true,
-		DisableKeepAlives:     ctx.Bool("disable-http-keepalive"),
+	switch {
+	case ctx.Bool("ktls"):
+		return clientTransportKTLS(ctx)
+	case ctx.Bool("tls"):
+		return clientTransportTLS(ctx)
+	default:
+		return clientTransportDefault(ctx)
 	}
-	if ctx.Bool("tls") || ctx.Bool("ktls") {
-		// Keep TLS config.
-		if !ctx.Bool("ktls") {
-			tr.TLSClientConfig = &tls.Config{
-				RootCAs: mustGetSystemCertPool(),
-				// Can't use SSLv3 because of POODLE and BEAST
-				// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
-				// Can't use TLSv1.1 because of RC4 cipher usage
-				MinVersion:         tls.VersionTLS12,
-				InsecureSkipVerify: ctx.Bool("insecure"),
-				ClientSessionCache: tls.NewLRUClientSessionCache(1024), // up to 1024 nodes
-			}
-		} else {
-			d := ktls.Dialer{
-				NetDialer: &net.Dialer{
-					Timeout:   10 * time.Second,
-					KeepAlive: 10 * time.Second,
-				},
-				Config: &ktls.Config{
-					KernelRX: true,
-					KernelTX: true,
-					// Prefer the cipher suites that are available in the kernel.
-					PreferCipherSuites: true,
-					// We don't care about the size.
-					CertCompressionDisabled: true,
-					// Should be ok for benchmarks.
-					AllowEarlyData: true,
-					// Can't use SSLv3 because of POODLE and BEAST
-					// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
-					// Can't use TLSv1.1 because of RC4 cipher usage
-					RootCAs:            mustGetSystemCertPool(),
-					MinVersion:         tls.VersionTLS12,
-					InsecureSkipVerify: ctx.Bool("insecure"),
-					ClientSessionCache: ktls.NewLRUClientSessionCache(1024), // up to 1024 nodes
-				},
-			}
-			if ctx.Bool("debug") {
-				d.Config.KeyLogWriter = os.Stdout
-			}
-			tr.DialContext = nil
-			tr.DialTLSContext = d.DialContext
-		}
-		// Because we create a custom TLSClientConfig, we have to opt-in to HTTP/2.
-		// See https://github.com/golang/go/issues/14275
-		if ctx.Bool("http2") {
-			http2.ConfigureTransport(tr)
-		}
-	}
-	return tr
 }
 
 // parseHosts will parse the host parameter given.
