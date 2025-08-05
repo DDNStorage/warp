@@ -134,8 +134,8 @@ func newInfluxDB(ctx *cli.Context, wg *sync.WaitGroup) chan<- bench.Operation {
 }
 
 func sendSummaries(hosts map[string]map[string]aggregatedStats, totalOp map[string]aggregatedStats,
-	tags map[string]string, writeAPI influxapi.WriteAPI) {
-
+	tags map[string]string, writeAPI influxapi.WriteAPI,
+) {
 	// Send summaries for each host
 	for host, ops := range hosts {
 		for op, stats := range ops {

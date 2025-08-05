@@ -357,8 +357,8 @@ func (g *Get) Start(ctx context.Context, wait chan struct{}) error {
 				}
 				fbr.r = o
 
-				var dst = io.Discard
-				var objInfo, e = o.Stat()
+				dst := io.Discard
+				objInfo, e := o.Stat()
 				if e != nil {
 					g.Error("error getting object info:", err)
 					op.Err = err.Error()
@@ -367,9 +367,9 @@ func (g *Get) Start(ctx context.Context, wait chan struct{}) error {
 					cldone()
 					continue
 				}
-				var etag = objInfo.ETag
+				etag := objInfo.ETag
 
-				var md5hash hash.Hash = nil
+				var md5hash hash.Hash
 				if g.VerifyMD5 && !g.RandomRanges && !strings.Contains(etag, "-") {
 					md5hash = md5.New()
 					dst = md5hash

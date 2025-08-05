@@ -37,7 +37,6 @@ type Options struct {
 	totalSize      int64
 	randomPrefix   int
 	randSize       bool
-	percentCompr   int
 
 	// Activates the use of a distribution of sizes
 	flagSizesDistribution bool

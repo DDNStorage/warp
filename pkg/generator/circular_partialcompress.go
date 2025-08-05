@@ -101,7 +101,7 @@ func newCircularPartialCompressible(o Options) (Source, error) {
 			continue
 		}
 		if i+o.partialCompr.compressibleChunkSize > size {
-			//fmt.Printf("skipping the last chunk so we don't overflow!\n" )
+			// fmt.Printf("skipping the last chunk so we don't overflow!\n" )
 			continue
 		}
 
@@ -162,57 +162,4 @@ func (r *circularPartialCompressibleSrc) String() string {
 
 func (r *circularPartialCompressibleSrc) Prefix() string {
 	return r.obj.Prefix
-}
-
-// 32k alternating rand and non-rand
-type circularCompressibleReader struct {
-	buf    []byte
-	pos    int64
-	end    int64
-	remain int64
-}
-
-func (cr *circularCompressibleReader) Read(p []byte) (n int, err error) {
-	if cr.remain <= 0 {
-		return 0, io.EOF
-	}
-
-	if int64(len(p)) > cr.remain {
-		p = p[:cr.remain]
-	}
-
-	n = len(p)
-	for i := range p {
-		p[i] = cr.buf[cr.pos%int64(len(cr.buf))]
-		cr.pos++
-	}
-
-	cr.remain -= int64(n)
-	return n, nil
-}
-
-func (cr *circularCompressibleReader) Seek(offset int64, whence int) (int64, error) {
-	var abs int64
-	switch whence {
-	case io.SeekStart:
-		abs = offset
-	case io.SeekCurrent:
-		abs = cr.pos - cr.end + cr.remain + offset
-	case io.SeekEnd:
-		abs = cr.remain + offset
-	default:
-		return 0, fmt.Errorf("invalid whence: %d", whence)
-	}
-
-	if abs < 0 {
-		return 0, fmt.Errorf("negative position: %d", abs)
-	}
-
-	if abs > cr.end-cr.pos {
-		cr.remain = 0
-		return cr.end - cr.pos, io.EOF
-	}
-
-	cr.remain = cr.end - cr.pos - abs
-	return abs, nil
 }
