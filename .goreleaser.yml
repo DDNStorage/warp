@@ -45,10 +45,10 @@ checksum:
   name_template: 'checksums.txt'
 
 snapshot:
-name_template: 'snapshot-{{ time "2006-01-02" }}'
+  name_template: 'snapshot-{{ time "2006-01-02" }}'
 changelog:
   sort: asc
-  filter  s:
+  filters:
     exclude:
     - '^docs:'
     - '^test:'
