@@ -39,7 +39,7 @@ warp:
 
     # Specify one or more hosts.
     # The benchmark will be run against all hosts concurrently.
-    # Multiple servers can be specified with elipsis notation;
+    # Multiple servers can be specified with ellipsis notation;
     # for example '10.0.0.{1...10}:9000' specifies 10 hosts.
     # See more at https://github.com/minio/warp?tab=readme-ov-file#multiple-hosts
     host:
@@ -79,6 +79,10 @@ warp:
     # Enable extended MinIO ListObjects with metadata,
     # by default this benchmarking uses ListObjectsV2 API
     metadata: false
+
+    # The number of keys to request per list request.
+    # Must be between 1 and 5000.
+    max-keys: 100
 
     # Properties of uploaded objects.
     obj:

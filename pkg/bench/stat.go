@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
-	"github.com/minio/pkg/v2/console"
 	"github.com/minio/warp/pkg/generator"
 )
 
@@ -35,15 +34,84 @@ type Stat struct {
 	Common
 
 	// Default Stat options.
-	StatOpts      minio.StatObjectOptions
+	StatOpts   minio.StatObjectOptions
+	ListPrefix string
+
 	objects       generator.Objects
 	CreateObjects int
 	Versions      int
+
+	ListExisting bool
+	ListFlat     bool
 }
 
 // Prepare will create an empty bucket or delete any content already there
 // and upload a number of objects.
 func (g *Stat) Prepare(ctx context.Context) error {
+	// prepare the bench by listing object from the bucket
+	if g.ListExisting {
+		cl, done := g.Client()
+
+		// ensure the bucket exist
+		found, err := cl.BucketExists(ctx, g.Bucket())
+		if err != nil {
+			return err
+		}
+		if !found {
+			return (fmt.Errorf("bucket %s does not exist and --list-existing has been set", g.Bucket()))
+		}
+
+		// list all objects
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		objectCh := cl.ListObjects(ctx, g.Bucket(), minio.ListObjectsOptions{
+			WithVersions: g.Versions > 1,
+			Prefix:       g.ListPrefix,
+			Recursive:    !g.ListFlat,
+		})
+
+		versions := map[string]int{}
+
+		for object := range objectCh {
+			if object.Err != nil {
+				return object.Err
+			}
+			if object.Size == 0 {
+				continue
+			}
+			obj := generator.Object{
+				Name: object.Key,
+				Size: object.Size,
+			}
+
+			if g.Versions > 1 {
+				if object.VersionID == "" {
+					continue
+				}
+
+				if version, found := versions[object.Key]; found {
+					if version >= g.Versions {
+						continue
+					}
+				}
+				versions[object.Key]++
+				obj.VersionID = object.VersionID
+			}
+
+			g.objects = append(g.objects, obj)
+
+			// limit to ListingMaxObjects
+			if g.CreateObjects > 0 && len(g.objects) >= g.CreateObjects {
+				break
+			}
+		}
+		if len(g.objects) == 0 {
+			return (fmt.Errorf("no objects found for bucket %s", g.Bucket()))
+		}
+		done()
+		return nil
+	}
+
 	if err := g.createEmptyBucket(ctx); err != nil {
 		return err
 	}
@@ -58,18 +126,16 @@ func (g *Stat) Prepare(ctx context.Context) error {
 		}
 		done()
 	}
-	console.Eraseline()
 	x := ""
 	if g.Versions > 1 {
 		x = fmt.Sprintf(" with %d versions each", g.Versions)
 	}
-	console.Info("\rUploading ", g.CreateObjects, " objects", x)
+	g.UpdateStatus(fmt.Sprint("Uploading ", g.CreateObjects, " objects", x))
 
 	var wg sync.WaitGroup
 	wg.Add(g.Concurrency)
-	g.addCollector()
 	objs := splitObjs(g.CreateObjects, g.Concurrency)
-	rcv := g.Collector.rcv
+	rcv := g.Collector.Receiver()
 	var groupErr error
 	var mu sync.Mutex
 
@@ -149,7 +215,7 @@ func (g *Stat) Prepare(ctx context.Context) error {
 
 // Start will execute the main benchmark.
 // Operations should begin executing when the start channel is closed.
-func (g *Stat) Start(ctx context.Context, wait chan struct{}) (Operations, error) {
+func (g *Stat) Start(ctx context.Context, wait chan struct{}) error {
 	var wg sync.WaitGroup
 	wg.Add(g.Concurrency)
 	c := g.Collector
@@ -215,7 +281,7 @@ func (g *Stat) Start(ctx context.Context, wait chan struct{}) (Operations, error
 		}(i)
 	}
 	wg.Wait()
-	return c.Close(), nil
+	return nil
 }
 
 // Cleanup deletes everything uploaded to the bucket.

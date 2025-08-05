@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
-	"github.com/minio/pkg/v2/console"
 	"github.com/minio/warp/pkg/generator"
 )
 
@@ -133,10 +132,12 @@ func (m *MixedDistribution) deleteRandomObj() generator.Object {
 	panic("ran out of objects")
 }
 
-func (m *MixedDistribution) addObj(o generator.Object) {
+func (m *MixedDistribution) addObj(o generator.Object) int {
 	m.mu.Lock()
 	m.objects[o.Name] = o
+	n := len(m.objects)
 	m.mu.Unlock()
+	return n
 }
 
 func (m *MixedDistribution) getOp() string {
@@ -157,11 +158,9 @@ func (g *Mixed) Prepare(ctx context.Context) error {
 		return err
 	}
 	src := g.Source()
-	console.Eraseline()
-	console.Info("\rUploading ", g.CreateObjects, " objects of ", src.String())
+	g.UpdateStatus(fmt.Sprint("Uploading ", g.CreateObjects, " objects of ", src.String()))
 	var wg sync.WaitGroup
 	wg.Add(g.Concurrency)
-	g.addCollector()
 	var groupErr error
 
 	objs := splitObjs(g.CreateObjects, g.Concurrency)
@@ -212,8 +211,8 @@ func (g *Mixed) Prepare(ctx context.Context) error {
 				}
 				clDone()
 				obj.Reader = nil
-				g.Dist.addObj(*obj)
-				g.prepareProgress(float64(len(g.Dist.objects)) / float64(g.CreateObjects))
+				n := g.Dist.addObj(*obj)
+				g.prepareProgress(float64(n) / float64(g.CreateObjects))
 			}
 		}(obj)
 	}
@@ -223,7 +222,7 @@ func (g *Mixed) Prepare(ctx context.Context) error {
 
 // Start will execute the main benchmark.
 // Operations should begin executing when the start channel is closed.
-func (g *Mixed) Start(ctx context.Context, wait chan struct{}) (Operations, error) {
+func (g *Mixed) Start(ctx context.Context, wait chan struct{}) error {
 	var wg sync.WaitGroup
 	wg.Add(g.Concurrency)
 	c := g.Collector
@@ -276,7 +275,7 @@ func (g *Mixed) Start(ctx context.Context, wait chan struct{}) (Operations, erro
 					o, err := client.GetObject(nonTerm, g.Bucket(), obj.Name, getOpts)
 					fbr.r = o
 					if err != nil {
-						g.Error( fmt.Printf("download error in GetObject. Error '%s', filename '%s', bucket '%s'", err, obj.Name, g.Bucket() ) )
+						g.Error(fmt.Printf("download error in GetObject. Error '%s', filename '%s', bucket '%s'", err, obj.Name, g.Bucket()))
 						op.Err = err.Error()
 						op.End = time.Now()
 						rcv <- op
@@ -286,7 +285,7 @@ func (g *Mixed) Start(ctx context.Context, wait chan struct{}) (Operations, erro
 					}
 					n, err := io.Copy(io.Discard, &fbr)
 					if err != nil {
-						g.Error( fmt.Sprintf("download error in io.Copy. Error '%s', filename '%s', bucket '%s'", err, obj.Name, g.Bucket() ) )
+						g.Error(fmt.Sprintf("download error in io.Copy. Error '%s', filename '%s', bucket '%s'", err, obj.Name, g.Bucket()))
 						op.Err = err.Error()
 					}
 					op.FirstByte = fbr.t
@@ -316,7 +315,7 @@ func (g *Mixed) Start(ctx context.Context, wait chan struct{}) (Operations, erro
 					res, err := client.PutObject(nonTerm, g.Bucket(), obj.Name, obj.Reader, obj.Size, putOpts)
 					op.End = time.Now()
 					if err != nil {
-						g.Error(fmt.Sprintf("upload error in putObject. Error '%s', filename '%s', bucket '%s'", err, obj.Name, g.Bucket()) )
+						g.Error(fmt.Sprintf("upload error in putObject. Error '%s', filename '%s', bucket '%s'", err, obj.Name, g.Bucket()))
 						op.Err = err.Error()
 					}
 					obj.VersionID = res.VersionID
@@ -350,7 +349,7 @@ func (g *Mixed) Start(ctx context.Context, wait chan struct{}) (Operations, erro
 					op.End = time.Now()
 					clDone()
 					if err != nil {
-						g.Error(fmt.Sprintf("delete error in RemoveObject. Error '%s', filename '%s',  bucket '%s'", err, obj.Name, g.Bucket()) )
+						g.Error(fmt.Sprintf("delete error in RemoveObject. Error '%s', filename '%s',  bucket '%s'", err, obj.Name, g.Bucket()))
 						op.Err = err.Error()
 					}
 					rcv <- op
@@ -369,7 +368,7 @@ func (g *Mixed) Start(ctx context.Context, wait chan struct{}) (Operations, erro
 					var err error
 					objI, err := client.StatObject(nonTerm, g.Bucket(), obj.Name, statOpts)
 					if err != nil {
-						g.Error(fmt.Sprintf("stat error StatObject. Error '%s', filename '%s',  bucket '%s'", err, obj.Name, g.Bucket()) )
+						g.Error(fmt.Sprintf("stat error StatObject. Error '%s', filename '%s',  bucket '%s'", err, obj.Name, g.Bucket()))
 						op.Err = err.Error()
 					}
 					op.End = time.Now()
@@ -387,7 +386,7 @@ func (g *Mixed) Start(ctx context.Context, wait chan struct{}) (Operations, erro
 		}(i)
 	}
 	wg.Wait()
-	return c.Close(), nil
+	return nil
 }
 
 // Cleanup deletes everything uploaded to the bucket.

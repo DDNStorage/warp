@@ -34,17 +34,16 @@ type Fanout struct {
 	prefixes map[string]struct{}
 }
 
-// Prepare will create an empty bucket ot delete any content already there.
+// Prepare will create an empty bucket or delete any content already there.
 func (u *Fanout) Prepare(ctx context.Context) error {
 	return u.createEmptyBucket(ctx)
 }
 
 // Start will execute the main benchmark.
 // Operations should begin executing when the start channel is closed.
-func (u *Fanout) Start(ctx context.Context, wait chan struct{}) (Operations, error) {
+func (u *Fanout) Start(ctx context.Context, wait chan struct{}) error {
 	var wg sync.WaitGroup
 	wg.Add(u.Concurrency)
-	u.addCollector()
 	c := u.Collector
 	if u.AutoTermDur > 0 {
 		ctx = c.AutoTerm(ctx, http.MethodPost, u.AutoTermScale, autoTermCheck, autoTermSamples, u.AutoTermDur)
@@ -133,7 +132,7 @@ func (u *Fanout) Start(ctx context.Context, wait chan struct{}) (Operations, err
 		}(i)
 	}
 	wg.Wait()
-	return c.Close(), nil
+	return nil
 }
 
 // Cleanup deletes everything uploaded to the bucket.

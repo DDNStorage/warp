@@ -19,7 +19,6 @@ package cli
 
 import (
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -31,21 +30,24 @@ import (
 	"github.com/cheggaaa/pb"
 	"github.com/minio/cli"
 	"github.com/minio/mc/pkg/probe"
-	"github.com/minio/pkg/v2/console"
-	"github.com/minio/pkg/v2/trie"
-	"github.com/minio/pkg/v2/words"
+	"github.com/minio/pkg/v3/console"
+	"github.com/minio/pkg/v3/trie"
+	"github.com/minio/pkg/v3/words"
 	"github.com/minio/warp/pkg"
 	completeinstall "github.com/posener/complete/cmd/install"
 )
 
 var (
-	globalQuiet   = false // Quiet flag set via command line
-	globalJSON    = false // Json flag set via command line
-	globalDebug   = false // Debug flag set via command line
-	globalNoColor = false // No Color flag set via command line
-	globalExitOnFailure   = false // exit on first failure, set via command line
-	globalFailCmd = "" // script to run on a failure, set via command line
+	globalQuiet         = false // Quiet flag set via command line
+	globalJSON          = false // Json flag set via command line
+	globalDebug         = false // Debug flag set via command line
+	globalNoColor       = false // No Color flag set via command line
+	globalExitOnFailure = false // exit on first failure, set via command line
+	globalFailCmd       = ""    // script to run on a failure, set via command line
 
+	GlobalVersion string
+	GlobalCommit  string
+	GlobalDate    string
 )
 
 const (
@@ -65,7 +67,6 @@ func Main(args []string) {
 			return
 		}
 	}
-	rand.Seed(time.Now().UnixNano())
 
 	probe.Init() // Set project's root source path.
 	probe.SetAppInfo("Release-Tag", pkg.ReleaseTag)
@@ -94,13 +95,14 @@ func init() {
 		deleteCmd,
 		listCmd,
 		statCmd,
-		selectCmd,
 		versionedCmd,
 		retentionCmd,
 		multipartCmd,
+		multipartPutCmd,
 		zipCmd,
 		snowballCmd,
 		fanoutCmd,
+		appendCmd,
 	}
 	b := []cli.Command{
 		analyzeCmd,
@@ -169,7 +171,7 @@ func registerApp(name string, appCmds []cli.Command) *cli.App {
 		cfg := &mprofile.Config{
 			Path:           ctx.String("pprofdir"),
 			UseTempPath:    false,
-			Quiet:          false,
+			Quiet:          ctx.Bool("quiet") || ctx.Bool("json"),
 			MemProfileRate: 4096,
 			MemProfileType: "heap",
 			CloserHook:     nil,

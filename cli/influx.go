@@ -88,7 +88,10 @@ func newInfluxDB(ctx *cli.Context, wg *sync.WaitGroup) chan<- bench.Operation {
 	ch := make(chan bench.Operation, 10000)
 	wg.Add(1)
 	go func() {
-
+		defer func() {
+			writeAPI.Flush()
+			wg.Done()
+		}()
 		hosts := make(map[string]map[string]aggregatedStats, 100)
 		totalOp := make(map[string]aggregatedStats, 5)
 		ticker := time.NewTicker(time.Second)
@@ -131,8 +134,8 @@ func newInfluxDB(ctx *cli.Context, wg *sync.WaitGroup) chan<- bench.Operation {
 }
 
 func sendSummaries(hosts map[string]map[string]aggregatedStats, totalOp map[string]aggregatedStats,
-	tags map[string]string, writeAPI influxapi.WriteAPI) {
-
+	tags map[string]string, writeAPI influxapi.WriteAPI,
+) {
 	// Send summaries for each host
 	for host, ops := range hosts {
 		for op, stats := range ops {

@@ -20,11 +20,12 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/minio/cli"
 	"github.com/minio/mc/pkg/probe"
-	"github.com/minio/pkg/v2/console"
+	"github.com/minio/pkg/v3/console"
 	"github.com/minio/warp/pkg/bench"
 	"github.com/minio/warp/pkg/generator"
 
@@ -144,11 +145,11 @@ func setGlobals(quiet, debug, json, noColor, exitOnFail bool, failCmd string) {
 func commandLine(ctx *cli.Context) string {
 	s := os.Args[0] + " " + ctx.Command.Name
 	for _, flag := range ctx.Command.Flags {
-		val, err := flagToJSON(ctx, flag)
+		name := strings.Split(flag.GetName(), ",")[0]
+		val, err := flagToJSON(ctx, flag, name)
 		if err != nil || val == "" {
 			continue
 		}
-		name := flag.GetName()
 		switch name {
 		case "access-key", "secret-key", "influxdb":
 			val = "*REDACTED*"
@@ -178,10 +179,21 @@ var ioFlags = []cli.Flag{
 		EnvVar: appNameUC + "_SECRET_KEY",
 		Value:  "",
 	},
+	cli.StringFlag{
+		Name:   "session-token",
+		Usage:  "Specify secret key",
+		EnvVar: appNameUC + "_SESSION_TOKEN",
+		Value:  "",
+	},
 	cli.BoolFlag{
 		Name:   "tls",
 		Usage:  "Use TLS (HTTPS) for transport",
 		EnvVar: appNameUC + "_TLS",
+	},
+	cli.BoolFlag{
+		Name:   "ktls",
+		Usage:  "Use Kernel TLS (HTTPS) for transport if available",
+		EnvVar: appNameUC + "_KTLS",
 	},
 	cli.StringFlag{
 		Name:   "region",
@@ -287,6 +299,20 @@ var ioFlags = []cli.Flag{
 		Value: 0,
 		Usage: "Rate limit each instance to this number of requests per second (0 to disable)",
 	},
+	cli.BoolFlag{
+		Name:   "stdout",
+		Usage:  "Send operations to stdout",
+		Hidden: true,
+	},
+	cli.StringFlag{
+		Name:  "lookup",
+		Usage: "Force requests to be 'host' for host-style or 'path' for path-style lookup. Default will attempt autodetect based on remote host name.",
+	},
+	cli.StringFlag{
+		Name:  "checksum",
+		Usage: "Add checksum to uploaded object. Values: CRC64NVME, CRC32[-FO], CRC32C[-FO], SHA1 or SHA256. Requires server trailing headers (AWS, MinIO)",
+		Value: "",
+	},
 }
 
 func getCommon(ctx *cli.Context, src func() generator.Source) bench.Common {
@@ -300,6 +326,32 @@ func getCommon(ctx *cli.Context, src func() generator.Source) bench.Common {
 			extra = append(extra, in)
 		}
 	}
+	statusln := func(s string) {
+		console.Eraseline()
+		console.Print(s)
+	}
+	if globalQuiet {
+		statusln = func(_ string) {}
+	}
+
+	if ctx.Bool("stdout") {
+		globalQuiet = true
+		statusln = func(_ string) {}
+		so := make(chan bench.Operation, 1000)
+		go func() {
+			i := 0
+			var errState bool
+			for op := range so {
+				if errState {
+					continue
+				}
+				errState = op.WriteCSV(os.Stdout, i) != nil
+				i++
+			}
+		}()
+		extra = append(extra, so)
+	}
+	noOps := ctx.Bool("stress")
 
 	rpsLimit := ctx.Float64("rps-limit")
 	var rpsLimiter *rate.Limiter
@@ -326,16 +378,20 @@ func getCommon(ctx *cli.Context, src func() generator.Source) bench.Common {
 		}
 	}
 
+	// Create put options now, so ensure that trailing headers are set.
+	putOpts := putOpts(ctx)
+
 	return bench.Common{
 		Client:        newClient(ctx),
 		Concurrency:   ctx.Int("concurrent"),
 		Source:        src,
 		Bucket:        bucketFunc,
 		Location:      ctx.String("region"),
-		PutOpts:       putOpts(ctx),
-		DiscardOutput: ctx.Bool("stress"),
+		PutOpts:       putOpts,
+		DiscardOutput: noOps,
 		ExtraOut:      extra,
 		RpsLimiter:    rpsLimiter,
 		Transport:     clientTransport(ctx),
+		UpdateStatus:  statusln,
 	}
 }

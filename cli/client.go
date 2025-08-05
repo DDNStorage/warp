@@ -19,8 +19,6 @@ package cli
 
 import (
 	"bufio"
-	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -34,16 +32,15 @@ import (
 	"time"
 
 	"github.com/minio/cli"
-	"github.com/minio/madmin-go/v3"
+	"github.com/minio/madmin-go/v4"
 	"github.com/minio/mc/pkg/probe"
 	md5simd "github.com/minio/md5-simd"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"github.com/minio/pkg/v2/certs"
-	"github.com/minio/pkg/v2/console"
-	"github.com/minio/pkg/v2/ellipses"
+	"github.com/minio/pkg/v3/certs"
+	"github.com/minio/pkg/v3/console"
+	"github.com/minio/pkg/v3/ellipses"
 	"github.com/minio/warp/pkg"
-	"golang.org/x/net/http2"
 )
 
 type hostSelectType string
@@ -106,16 +103,16 @@ func newClient(ctx *cli.Context) func() (cl *minio.Client, done func()) {
 			}
 		}
 		find := func() int {
-			min := math.MaxInt32
+			minSize := math.MaxInt32
 			for _, n := range running {
-				if n < min {
-					min = n
+				if n < minSize {
+					minSize = n
 				}
 			}
 			earliest := time.Now().Add(time.Second)
 			earliestIdx := 0
 			for i, n := range running {
-				if n == min {
+				if n == minSize {
 					if lastFinished[i].Before(earliest) {
 						earliest = lastFinished[i]
 						earliestIdx = i
@@ -148,24 +145,41 @@ func newClient(ctx *cli.Context) func() (cl *minio.Client, done func()) {
 // getClient creates a client with the specified host and the options set in the context.
 func getClient(ctx *cli.Context, host string) (*minio.Client, error) {
 	var creds *credentials.Credentials
+	transport := clientTransport(ctx)
 	switch strings.ToUpper(ctx.String("signature")) {
 	case "S3V4":
 		// if Signature version '4' use NewV4 directly.
-		creds = credentials.NewStaticV4(ctx.String("access-key"), ctx.String("secret-key"), "")
+		creds = credentials.NewStaticV4(ctx.String("access-key"), ctx.String("secret-key"), ctx.String("session-token"))
 	case "S3V2":
 		// if Signature version '2' use NewV2 directly.
 		creds = credentials.NewStaticV2(ctx.String("access-key"), ctx.String("secret-key"), "")
+	case "IAM":
+		creds = credentials.NewChainCredentials([]credentials.Provider{
+			&credentials.EnvAWS{},
+			&credentials.EnvMinio{},
+			&credentials.IAM{
+				Client: &http.Client{
+					Transport: transport,
+				},
+			},
+		})
 	default:
 		fatal(probe.NewError(errors.New("unknown signature method. S3V2 and S3V4 is available")), strings.ToUpper(ctx.String("signature")))
 	}
-
+	lookup := minio.BucketLookupAuto
+	if ctx.String("lookup") == "host" {
+		lookup = minio.BucketLookupDNS
+	} else if ctx.String("lookup") == "path" {
+		lookup = minio.BucketLookupPath
+	}
 	cl, err := minio.New(host, &minio.Options{
-		Creds:        creds,
-		Secure:       ctx.Bool("tls"),
-		Region:       ctx.String("region"),
-		BucketLookup: minio.BucketLookupAuto,
-		CustomMD5:    md5simd.NewServer().NewHash,
-		Transport:    clientTransport(ctx),
+		Creds:           creds,
+		Secure:          ctx.Bool("tls") || ctx.Bool("ktls"),
+		Region:          ctx.String("region"),
+		BucketLookup:    lookup,
+		CustomMD5:       md5simd.NewServer().NewHash,
+		Transport:       transport,
+		TrailingHeaders: useTrailingHeaders.Load(),
 	})
 	if err != nil {
 		return nil, err
@@ -180,60 +194,14 @@ func getClient(ctx *cli.Context, host string) (*minio.Client, error) {
 }
 
 func clientTransport(ctx *cli.Context) http.RoundTripper {
-	tr := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: func(c context.Context, network, addr string) (net.Conn, error) {
-			d := net.Dialer{
-				Timeout:   10 * time.Second,
-				KeepAlive: 10 * time.Second,
-			}
-			conn, err := d.DialContext(c, network, addr)
-			if err != nil {
-				return nil, err
-			}
-
-			// Type assert to get the underlying TCP connection
-			if tcpConn, ok := conn.(*net.TCPConn); ok {
-				// Set send buffer size
-				if err := tcpConn.SetWriteBuffer(ctx.Int("sndbuf")); err != nil {
-					return nil, fmt.Errorf("failed to set SO_SNDBUF: %v", err)
-				}
-				// Set receive buffer size
-				if err := tcpConn.SetReadBuffer(ctx.Int("rcvbuf")); err != nil {
-					return nil, fmt.Errorf("failed to set SO_RCVBUF: %v", err)
-				}
-			}
-
-			return conn, nil
-		},
-		MaxIdleConnsPerHost:   ctx.Int("concurrent"),
-		WriteBufferSize:       ctx.Int("sndbuf"),
-		ReadBufferSize:        ctx.Int("rcvbuf"),
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   15 * time.Second,
-		ExpectContinueTimeout: 10 * time.Second,
-		ResponseHeaderTimeout: 2 * time.Minute,
-		DisableCompression:    true,
-		DisableKeepAlives:     ctx.Bool("disable-http-keepalive"),
+	switch {
+	case ctx.Bool("ktls"):
+		return clientTransportKTLS(ctx)
+	case ctx.Bool("tls"):
+		return clientTransportTLS(ctx)
+	default:
+		return clientTransportDefault(ctx)
 	}
-	if ctx.Bool("tls") {
-		// Keep TLS config.
-		tr.TLSClientConfig = &tls.Config{
-			RootCAs: mustGetSystemCertPool(),
-			// Can't use SSLv3 because of POODLE and BEAST
-			// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
-			// Can't use TLSv1.1 because of RC4 cipher usage
-			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: ctx.Bool("insecure"),
-		}
-
-		// Because we create a custom TLSClientConfig, we have to opt-in to HTTP/2.
-		// See https://github.com/golang/go/issues/14275
-		if ctx.Bool("http2") {
-			http2.ConfigureTransport(tr)
-		}
-	}
-	return tr
 }
 
 // parseHosts will parse the host parameter given.
@@ -329,7 +297,7 @@ func newAdminClient(ctx *cli.Context) *madmin.AdminClient {
 
 	cl, err := madmin.NewWithOptions(hosts[0], &madmin.Options{
 		Creds:     credentials.NewStaticV4(ctx.String("access-key"), ctx.String("secret-key"), ""),
-		Secure:    ctx.Bool("tls"),
+		Secure:    ctx.Bool("tls") || ctx.Bool("ktls"),
 		Transport: clientTransport(ctx),
 	})
 	fatalIf(probe.NewError(err), "Unable to create MinIO admin client")

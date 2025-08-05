@@ -39,7 +39,7 @@ type Put struct {
 	cl         *http.Client
 }
 
-// Prepare will create an empty bucket ot delete any content already there.
+// Prepare will create an empty bucket or delete any content already there.
 func (u *Put) Prepare(ctx context.Context) error {
 	if u.PostObject {
 		u.cl = &http.Client{
@@ -51,10 +51,9 @@ func (u *Put) Prepare(ctx context.Context) error {
 
 // Start will execute the main benchmark.
 // Operations should begin executing when the start channel is closed.
-func (u *Put) Start(ctx context.Context, wait chan struct{}) (Operations, error) {
+func (u *Put) Start(ctx context.Context, wait chan struct{}) error {
 	var wg sync.WaitGroup
 	wg.Add(u.Concurrency)
-	u.addCollector()
 	c := u.Collector
 	if u.AutoTermDur > 0 {
 		ctx = c.AutoTerm(ctx, http.MethodPut, u.AutoTermScale, autoTermCheck, autoTermSamples, u.AutoTermDur)
@@ -70,7 +69,18 @@ func (u *Put) Start(ctx context.Context, wait chan struct{}) (Operations, error)
 		go func(i int) {
 			rcv := c.Receiver()
 			defer wg.Done()
+
+			// Copy usermetadata and usertags per concurrent thread.
 			opts := u.PutOpts
+			opts.UserMetadata = make(map[string]string, len(u.PutOpts.UserMetadata))
+			opts.UserTags = make(map[string]string, len(u.PutOpts.UserTags))
+			for k, v := range u.PutOpts.UserMetadata {
+				opts.UserMetadata[k] = v
+			}
+			for k, v := range u.PutOpts.UserTags {
+				opts.UserTags[k] = v
+			}
+
 			done := ctx.Done()
 
 			<-wait
@@ -113,13 +123,13 @@ func (u *Put) Start(ctx context.Context, wait chan struct{}) (Operations, error)
 				}
 				op.End = time.Now()
 				if err != nil {
-					u.Error( fmt.Sprintf("upload error in PutObject. Error '%s', filename '%s', bucket '%s', size '%s'", err, obj.Name, u.Bucket(), obj.Size ) )
+					u.Error(fmt.Sprintf("upload error in PutObject. Error '%s', filename '%s', bucket '%s', size '%d'", err, obj.Name, u.Bucket(), obj.Size))
 					op.Err = err.Error()
 				}
 				obj.VersionID = res.VersionID
 
 				if res.Size != obj.Size && op.Err == "" {
-					err := fmt.Sprintf("short upload; wanted %s and got %s. filename '%s', bucket '%s', size '%s'", obj.Size, res.Size, obj.Name, u.Bucket())
+					err := fmt.Sprintf("short upload; wanted %d and got %d. filename '%s', bucket '%s'", obj.Size, res.Size, obj.Name, u.Bucket())
 					if op.Err == "" {
 						op.Err = err
 					}
@@ -132,7 +142,7 @@ func (u *Put) Start(ctx context.Context, wait chan struct{}) (Operations, error)
 		}(i)
 	}
 	wg.Wait()
-	return c.Close(), nil
+	return nil
 }
 
 // Cleanup deletes everything uploaded to the bucket.

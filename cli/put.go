@@ -18,9 +18,16 @@
 package cli
 
 import (
+	"errors"
+	"fmt"
+	"math/rand"
+	"strings"
+	"sync/atomic"
+
 	"github.com/minio/cli"
+	"github.com/minio/mc/pkg/probe"
 	"github.com/minio/minio-go/v7"
-	"github.com/minio/pkg/v2/console"
+	"github.com/minio/pkg/v3/console"
 	"github.com/minio/warp/pkg/bench"
 )
 
@@ -42,13 +49,15 @@ var putFlags = []cli.Flag{
 	},
 }
 
+var PutCombinedFlags = combineFlags(globalFlags, ioFlags, putFlags, genFlags, benchFlags, analyzeFlags)
+
 // Put command.
 var putCmd = cli.Command{
 	Name:   "put",
 	Usage:  "benchmark put objects",
 	Action: mainPut,
 	Before: setGlobalsFromContext,
-	Flags:  combineFlags(globalFlags, ioFlags, putFlags, genFlags, benchFlags, analyzeFlags),
+	Flags:  PutCombinedFlags,
 	CustomHelpTemplate: `NAME:
   {{.HelpName}} - {{.Usage}}
 
@@ -71,17 +80,55 @@ func mainPut(ctx *cli.Context) error {
 	return runBench(ctx, &b)
 }
 
+const metadataChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890-_."
+
 // putOpts retrieves put options from the context.
 func putOpts(ctx *cli.Context) minio.PutObjectOptions {
 	pSize, _ := toSize(ctx.String("part.size"))
-	return minio.PutObjectOptions{
+	useMD5, checksumType := parseChecksum(ctx)
+	options := minio.PutObjectOptions{
 		ServerSideEncryption: newSSE(ctx),
 		DisableMultipart:     ctx.Bool("disable-multipart"),
 		DisableContentSha256: ctx.Bool("disable-sha256-payload"),
-		SendContentMd5:       ctx.Bool("md5"),
+		SendContentMd5:       useMD5,
+		Checksum:             checksumType,
 		StorageClass:         ctx.String("storage-class"),
 		PartSize:             pSize,
 	}
+
+	for _, flag := range []string{"add-metadata", "tag"} {
+		values := make(map[string]string)
+
+		for _, v := range ctx.StringSlice(flag) {
+			idx := strings.Index(v, "=")
+			if idx <= 0 {
+				console.Fatalf("--%s takes `key=value` argument", flag)
+			}
+			key := v[:idx]
+			value := v[idx+1:]
+			if len(value) == 0 {
+				console.Fatal("--%s value can't be empty", flag)
+			}
+			var randN int
+			if _, err := fmt.Sscanf(value, "rand:%d", &randN); err == nil {
+				rng := rand.New(rand.NewSource(int64(rand.Uint64())))
+				value = ""
+				for i := 0; i < randN; i++ {
+					value += string(metadataChars[rng.Int()%len(metadataChars)])
+				}
+			}
+			values[key] = value
+		}
+
+		switch flag {
+		case "metadata":
+			options.UserMetadata = values
+		case "tag":
+			options.UserTags = values
+		}
+	}
+
+	return options
 }
 
 func checkPutSyntax(ctx *cli.Context) {
@@ -91,4 +138,41 @@ func checkPutSyntax(ctx *cli.Context) {
 
 	checkAnalyze(ctx)
 	checkBenchmark(ctx)
+}
+
+var useTrailingHeaders atomic.Bool
+
+func parseChecksum(ctx *cli.Context) (useMD5 bool, ct minio.ChecksumType) {
+	useMD5 = ctx.Bool("md5")
+	if cs := ctx.String("checksum"); cs != "" {
+		switch strings.ToUpper(cs) {
+		case "CRC32":
+			ct = minio.ChecksumCRC32
+		case "CRC32C":
+			ct = minio.ChecksumCRC32C
+		case "CRC32-FO":
+			ct = minio.ChecksumFullObjectCRC32
+		case "CRC32C-FO":
+			ct = minio.ChecksumFullObjectCRC32C
+		case "SHA1":
+			ct = minio.ChecksumSHA1
+		case "SHA256":
+			ct = minio.ChecksumSHA256
+		case "CRC64N", "CRC64NVME":
+			ct = minio.ChecksumCRC64NVME
+		case "MD5":
+			useMD5 = true
+		default:
+			err := fmt.Errorf("unknown checksum type: %s. Should be one of CRC64NVME, MD5, CRC32, CRC32C, CRC32-FO, CRC32C-FO, SHA1 or SHA256", cs)
+			fatalIf(probe.NewError(err), "")
+		}
+		if ct.IsSet() {
+			useTrailingHeaders.Store(true)
+			if useMD5 {
+				err := errors.New("cannot combine MD5 with checksum")
+				fatalIf(probe.NewError(err), "")
+			}
+		}
+	}
+	return
 }

@@ -19,7 +19,7 @@ package cli
 
 import (
 	"github.com/minio/cli"
-	"github.com/minio/pkg/v2/console"
+	"github.com/minio/pkg/v3/console"
 	"github.com/minio/warp/pkg/bench"
 )
 
@@ -45,17 +45,19 @@ var listFlags = []cli.Flag{
 	},
 	cli.IntFlag{
 		Name:  "max-keys",
-		Value: 1000,
-		Usage: "Max keys to list per request",
+		Value: 100,
+		Usage: "Set the number of keys requested per list request.",
 	},
 }
+
+var ListCombinedFlags = combineFlags(globalFlags, ioFlags, listFlags, genFlags, benchFlags, analyzeFlags)
 
 var listCmd = cli.Command{
 	Name:   "list",
 	Usage:  "benchmark list objects",
 	Action: mainList,
 	Before: setGlobalsFromContext,
-	Flags:  combineFlags(globalFlags, ioFlags, listFlags, genFlags, benchFlags, analyzeFlags),
+	Flags:  ListCombinedFlags,
 	CustomHelpTemplate: `NAME:
   {{.HelpName}} - {{.Usage}}
 
@@ -93,7 +95,12 @@ func checkListSyntax(ctx *cli.Context) {
 	if ctx.Int("objects") < 1 {
 		console.Fatal("At least one object must be tested")
 	}
-
+	if ctx.Int("max-keys") < 1 {
+		console.Fatal("Max keys must be at least 1.")
+	}
+	if ctx.Int("max-keys") > 5000 {
+		console.Fatal("Max keys cannot be greater than 5000")
+	}
 	checkAnalyze(ctx)
 	checkBenchmark(ctx)
 }
