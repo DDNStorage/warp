@@ -46,7 +46,6 @@ var genFlags = []cli.Flag{
 		Value: 0,
 		Usage: "Percent of each object that should be compressible. Requires the partial compressible generator",
 	},
-
 }
 
 func newGenSourceCSV(ctx *cli.Context) func() generator.Source {

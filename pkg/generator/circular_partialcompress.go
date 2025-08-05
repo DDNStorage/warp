@@ -1,4 +1,5 @@
 package generator
+
 import (
 	"fmt"
 	"io"
@@ -7,9 +8,9 @@ import (
 
 // CircularPartialCompressibleOpts are the options for the circular partially compressible data source.
 type CircularPartialCompressibleOpts struct {
-	seed *int64
-	size int
-	percentCompressible int
+	seed                  *int64
+	size                  int
+	percentCompressible   int
 	compressibleChunkSize int
 }
 
@@ -17,8 +18,8 @@ func WithPartialCompressability(percent int) CircularPartialCompressibleOpts {
 	return CircularPartialCompressibleOpts{
 		seed: nil,
 		// Use 2^20 + 1 (1MB + 1 byte) as default size
-		size: 1<<20 + 1,
-		percentCompressible: percent,
+		size:                  1<<20 + 1,
+		percentCompressible:   percent,
 		compressibleChunkSize: 32000,
 	}
 }
@@ -92,19 +93,19 @@ func newCircularPartialCompressible(o Options) (Source, error) {
 	chunkIntervalToMakeCompressible := 100 / o.partialCompr.percentCompressible
 	//	fmt.Printf ("setting every %d chunks to be 0. chunk size %d total size %d\n", chunkOrder, o.partialCompr.compressibleChunkSize, size)
 
-	for i := 0; i < size; i += o.partialCompr.compressibleChunkSize	{
+	for i := 0; i < size; i += o.partialCompr.compressibleChunkSize {
 		//	fmt.Printf("checking offset %d chunk %d!\n", i, chunks)
 		chunkCount++
-		if chunkCount % chunkIntervalToMakeCompressible != 0{
+		if chunkCount%chunkIntervalToMakeCompressible != 0 {
 			//	fmt.Printf("skipping this chunk; %d %% %d == %d!\n", chunks, chunkOrder, chunks % chunkOrder )
 			continue
 		}
-		if  i + o.partialCompr.compressibleChunkSize > size {
+		if i+o.partialCompr.compressibleChunkSize > size {
 			//fmt.Printf("skipping the last chunk so we don't overflow!\n" )
 			continue
 		}
 
-		for j := i; j <  i + o.partialCompr.compressibleChunkSize; j++ {
+		for j := i; j < i+o.partialCompr.compressibleChunkSize; j++ {
 			// if j == i {
 			// 	fmt.Printf("setting the chunk started at %d to 0!\n", j )
 			// }
@@ -162,6 +163,7 @@ func (r *circularPartialCompressibleSrc) String() string {
 func (r *circularPartialCompressibleSrc) Prefix() string {
 	return r.obj.Prefix
 }
+
 // 32k alternating rand and non-rand
 type circularCompressibleReader struct {
 	buf    []byte

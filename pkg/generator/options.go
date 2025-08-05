@@ -38,7 +38,7 @@ type Options struct {
 	randomPrefix   int
 	randSize       bool
 	percentCompr   int
-	
+
 	// Activates the use of a distribution of sizes
 	flagSizesDistribution bool
 	sizesDistribution     hist.Int64Distribution
@@ -153,4 +153,3 @@ func WithPrefixSize(n int) Option {
 		return nil
 	}
 }
-

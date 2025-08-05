@@ -61,7 +61,7 @@ var getFlags = []cli.Flag{
 	cli.BoolFlag{
 		Name:  "list-flat",
 		Usage: "When using --list-existing, do not use recursive listing",
-	},	
+	},
 	cli.BoolFlag{
 		Name:  "extra-head",
 		Usage: "Many apps HEAD before GET. Add an extra HEAD operation to emulate this behavior.",

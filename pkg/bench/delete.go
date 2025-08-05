@@ -261,7 +261,7 @@ func (d *Delete) Start(ctx context.Context, wait chan struct{}) error {
 						break
 					}
 					if err.Err != nil {
-						d.Error( fmt.Sprintf("Error removing objects from bucket %s. Error %s", d.Bucket(), err))
+						d.Error(fmt.Sprintf("Error removing objects from bucket %s. Error %s", d.Bucket(), err))
 						op.Err = err.Err.Error()
 					}
 				}

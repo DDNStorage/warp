@@ -20,10 +20,10 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"time"
+	"os/exec"
 	"strings"
 	"sync"
-	"os/exec"
+	"time"
 	"unicode"
 
 	"github.com/cheggaaa/pb"
@@ -60,13 +60,13 @@ func printError(data ...interface{}) {
 	//put the timestamp in an interface so we can combine it with the actual error message
 	timestamp := []interface{}{time.Now().Format(time.DateTime)}
 	data = append(timestamp, data)
-	console.Errorln( data...)
+	console.Errorln(data...)
 	if len(globalFailCmd) > 0 {
 		console.Info(fmt.Sprintf("Executing %s\r", globalFailCmd))
 
 		//cmd := exec.Command( globalExitOnFailCmd)
 		//err := cmd.Run()
-		out, err := exec.Command( globalFailCmd).Output()
+		out, err := exec.Command(globalFailCmd).Output()
 		if err != nil {
 			console.Info(fmt.Sprintf("Unable to run %s: err %s\r", globalFailCmd, err))
 		} else {

@@ -275,7 +275,7 @@ func (g *Mixed) Start(ctx context.Context, wait chan struct{}) error {
 					o, err := client.GetObject(nonTerm, g.Bucket(), obj.Name, getOpts)
 					fbr.r = o
 					if err != nil {
-						g.Error( fmt.Printf("download error in GetObject. Error '%s', filename '%s', bucket '%s'", err, obj.Name, g.Bucket() ) )
+						g.Error(fmt.Printf("download error in GetObject. Error '%s', filename '%s', bucket '%s'", err, obj.Name, g.Bucket()))
 						op.Err = err.Error()
 						op.End = time.Now()
 						rcv <- op
@@ -285,7 +285,7 @@ func (g *Mixed) Start(ctx context.Context, wait chan struct{}) error {
 					}
 					n, err := io.Copy(io.Discard, &fbr)
 					if err != nil {
-						g.Error( fmt.Sprintf("download error in io.Copy. Error '%s', filename '%s', bucket '%s'", err, obj.Name, g.Bucket() ) )
+						g.Error(fmt.Sprintf("download error in io.Copy. Error '%s', filename '%s', bucket '%s'", err, obj.Name, g.Bucket()))
 						op.Err = err.Error()
 					}
 					op.FirstByte = fbr.t
@@ -315,7 +315,7 @@ func (g *Mixed) Start(ctx context.Context, wait chan struct{}) error {
 					res, err := client.PutObject(nonTerm, g.Bucket(), obj.Name, obj.Reader, obj.Size, putOpts)
 					op.End = time.Now()
 					if err != nil {
-						g.Error(fmt.Sprintf("upload error in putObject. Error '%s', filename '%s', bucket '%s'", err, obj.Name, g.Bucket()) )
+						g.Error(fmt.Sprintf("upload error in putObject. Error '%s', filename '%s', bucket '%s'", err, obj.Name, g.Bucket()))
 						op.Err = err.Error()
 					}
 					obj.VersionID = res.VersionID
@@ -349,7 +349,7 @@ func (g *Mixed) Start(ctx context.Context, wait chan struct{}) error {
 					op.End = time.Now()
 					clDone()
 					if err != nil {
-						g.Error(fmt.Sprintf("delete error in RemoveObject. Error '%s', filename '%s',  bucket '%s'", err, obj.Name, g.Bucket()) )
+						g.Error(fmt.Sprintf("delete error in RemoveObject. Error '%s', filename '%s',  bucket '%s'", err, obj.Name, g.Bucket()))
 						op.Err = err.Error()
 					}
 					rcv <- op
@@ -368,7 +368,7 @@ func (g *Mixed) Start(ctx context.Context, wait chan struct{}) error {
 					var err error
 					objI, err := client.StatObject(nonTerm, g.Bucket(), obj.Name, statOpts)
 					if err != nil {
-						g.Error(fmt.Sprintf("stat error StatObject. Error '%s', filename '%s',  bucket '%s'", err, obj.Name, g.Bucket()) )
+						g.Error(fmt.Sprintf("stat error StatObject. Error '%s', filename '%s',  bucket '%s'", err, obj.Name, g.Bucket()))
 						op.Err = err.Error()
 					}
 					op.End = time.Now()
