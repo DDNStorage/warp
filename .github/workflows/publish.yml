@@ -45,7 +45,7 @@ jobs:
           echo "### Packages downloads" >> $GITHUB_STEP_SUMMARY
           echo "| OS and Architecture | Download Link |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          for file in $(find dist -name '.deb' -o -name '.rpm'); do
+          for file in $(find dist -name '*.deb' -o -name '*.rpm'); do
             filename=$(basename $file)
             curl -u "${{ secrets.NEXUS_RW_LOGIN }}:${{ secrets.NEXUS_RW_PASSWORD }}" \
                 -X POST \
