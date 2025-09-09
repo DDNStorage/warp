@@ -45,7 +45,7 @@ jobs:
           echo "### Packages downloads" >> $GITHUB_STEP_SUMMARY
           echo "| OS and Architecture | Download Link |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          for file in $(find dist -name *.deb); do
+          for file in $(find dist -name '.deb' -o -name '.rpm'); do
             filename=$(basename $file)
             curl -u "${{ secrets.NEXUS_RW_LOGIN }}:${{ secrets.NEXUS_RW_PASSWORD }}" \
                 -X POST \
@@ -57,7 +57,7 @@ jobs:
                 -F "raw.asset1.filename=$filename"
             # Create summary row
             # os_arch eg: Linux_arm64
-            os_arch=$(echo $file | sed -r "s/.*ddn_(.*).deb/\1/")
+            os_arch=$(echo $file | sed -r "s/.*ddn_(.*).(deb|rpm)/\1/")
             url="https://nexus.redlab.datadirectnet.com/repository/cicd/$pkgs_directory/$filename" 
             echo "| $os_arch | [Download]($url)" >> $GITHUB_STEP_SUMMARY
           done
