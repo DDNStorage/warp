@@ -17,13 +17,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Mirror warp repository from github.com to Gitea
-        shell: bash
-        run: |
-          echo "Trying to mirror the repository in Gitea .."
-          git push --mirror https://${{ secrets.GITEA_MIRROR_USERNAME }}:${{ secrets.GITEA_MIRROR_TOKEN }}@gitea.redlab.datadirectnet.com/red/warp.git
-  
-
       - name: Mirror warp repository from github.com to GHE
         shell: bash
         run: |
